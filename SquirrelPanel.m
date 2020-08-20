@@ -581,6 +581,7 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
   NSMutableDictionary *_preeditHighlightedAttrs;
   NSParagraphStyle *_paragraphStyle;
   NSParagraphStyle *_preeditParagraphStyle;
+  NSAffineTransform *transform;
   NSRange preeditRange;
   NSRect screenRect;
   double tempHeight;
@@ -752,13 +753,19 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
     windowRect.origin.y = NSMinY(screenRect);
   }
   // rotate the view, the core in vertical mode!
+  NSAffineTransform *transform;
+  [transform scaleXBy:1 yBy:-1];
   if (_vertical) {
     _view.boundsRotation = 90.0;
     [_view setBoundsOrigin:NSMakePoint(0, windowRect.size.width)];
+    [transform translateXBy:0 yBy:windowRect.size.height-windowRect.size.width];
+    [transform rotateByDegrees:-90];
   } else {
     _view.boundsRotation = 0;
     [_view setBoundsOrigin:NSMakePoint(0, 0)];
+    [transform translateXBy:0 yBy:windowRect.size.height];
   }
+  [transform translateXBy:windowRect.origin.x yBy:windowRect.origin.y];
   [_window setFrame:windowRect display:YES];
   [_window invalidateShadow];
   [_window orderFront:nil];
