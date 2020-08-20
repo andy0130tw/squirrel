@@ -15,6 +15,7 @@ static NSString *const kDefaultCandidateFormat = @"%c. %@";
 @property(nonatomic, readonly) NSRange highlightedPreeditRange;
 @property(nonatomic, readonly) NSRect contentRect;
 @property(nonatomic, readonly) double textFrameWidth;
+@property(nonatomic, readonly, strong) NSBezierPath *candicateArea;
 
 @property(nonatomic, assign) double cornerRadius;
 @property(nonatomic, assign) double hilitedCornerRadius;
@@ -515,15 +516,16 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
   borderPath.lineWidth = _borderWidth;
 
   // Calculate intersections
+  if (![preeditPath isEmpty]) {
+    [backgroundPath appendBezierPath:[preeditPath copy]];
+  }
+  _candicateArea = [backgroundPath copy];
+  
   if (![highlightedPath isEmpty]) {
     [backgroundPath appendBezierPath:[highlightedPath copy]];
     if (![highlightedPath2 isEmpty]) {
       [backgroundPath appendBezierPath:[highlightedPath2 copy]];
     }
-  }
-  
-  if (![preeditPath isEmpty]) {
-    [backgroundPath appendBezierPath:[preeditPath copy]];
   }
   
   if (![highlightedPreeditPath isEmpty]) {
@@ -534,6 +536,7 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
   }
   [backgroundPath setWindingRule:NSEvenOddWindingRule];
   [preeditPath setWindingRule:NSEvenOddWindingRule];
+  [_candicateArea setWindingRule:NSEvenOddWindingRule];
 
   [_backgroundColor setFill];
   [backgroundPath fill];
@@ -581,10 +584,10 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
   NSMutableDictionary *_preeditHighlightedAttrs;
   NSParagraphStyle *_paragraphStyle;
   NSParagraphStyle *_preeditParagraphStyle;
-  NSAffineTransform *transform;
   NSRange preeditRange;
   NSRect screenRect;
   double tempHeight;
+  NSMutableArray<NSString *> *candidateRanges;
 
   NSString *_statusMessage;
   NSTimer *_statusTimer;
@@ -753,19 +756,13 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
     windowRect.origin.y = NSMinY(screenRect);
   }
   // rotate the view, the core in vertical mode!
-  NSAffineTransform *transform;
-  [transform scaleXBy:1 yBy:-1];
   if (_vertical) {
     _view.boundsRotation = 90.0;
     [_view setBoundsOrigin:NSMakePoint(0, windowRect.size.width)];
-    [transform translateXBy:0 yBy:windowRect.size.height-windowRect.size.width];
-    [transform rotateByDegrees:-90];
   } else {
     _view.boundsRotation = 0;
     [_view setBoundsOrigin:NSMakePoint(0, 0)];
-    [transform translateXBy:0 yBy:windowRect.size.height];
   }
-  [transform translateXBy:windowRect.origin.x yBy:windowRect.origin.y];
   [_window setFrame:windowRect display:YES];
   [_window invalidateShadow];
   [_window orderFront:nil];
@@ -998,6 +995,7 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
     if (i == index) {
       highlightedRange = NSMakeRange(text.length, line.length);
     }
+    [candidateRanges addObject:NSStringFromRange(NSMakeRange(text.length, line.length))];
     [text appendAttributedString:line];
   }
   // text done!
@@ -1033,6 +1031,32 @@ void expand(NSMutableArray<NSValue *> *vertex, NSRect innerBorder, NSRect outerB
 
 - (void)hideStatus:(NSTimer *)timer {
   [self hide];
+}
+
+// -1 means invalid position
+- (NSInteger)candidateAtPoint:(NSPoint)point {
+  NSAffineTransform *transform;
+  [transform translateXBy:-_window.frame.origin.x yBy:-_window.frame.origin.y];
+  if (_vertical) {
+    [transform rotateByDegrees:90];
+    [transform translateXBy:0 yBy:_window.frame.size.width];
+  }
+  [transform scaleXBy:1 yBy:-1];
+  [transform translateXBy:0 yBy:_window.frame.size.height];
+  point = [transform transformPoint:point];
+  if ([_view.candicateArea isEmpty] || ![_view.candicateArea containsPoint:point]) {
+    return -1;
+  } else {
+    CGFloat *fraction;
+    NSInteger charcterIndex = [_view.text.layoutManagers[0] characterIndexForPoint:point inTextContainer:_view.text.layoutManagers[0].textContainers[0] fractionOfDistanceBetweenInsertionPoints:fraction];
+    for (NSUInteger i = 0; i < candidateRanges.count; i += 1) {
+      NSRange workingRange = NSRangeFromString(candidateRanges[i]);
+      if (NSLocationInRange(charcterIndex, workingRange)) {
+        return i;
+      }
+    }
+    return -1;
+  }
 }
 
 static inline NSColor *blendColors(NSColor *foregroundColor,

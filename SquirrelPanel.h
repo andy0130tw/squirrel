@@ -25,4 +25,6 @@
 
 -(void)updateConfig:(SquirrelConfig*)config;
 
+-(NSInteger)candidateAtPoint:(NSPoint)point;
+
 @end
