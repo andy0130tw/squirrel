@@ -111,6 +111,7 @@ copy-sparkle-framework:
 
 clean-sparkle:
 	rm -rf Frameworks/* > /dev/null 2>&1 || true
+	rm -rf Sparkle/build > /dev/null 2>&1 || true
 
 .PHONY: package archive sign-archive
 
