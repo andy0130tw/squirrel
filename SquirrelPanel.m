@@ -598,7 +598,7 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
   }
 }
 
-- (void)drawHighlighted:(NSBezierPath **)path path2:(NSBezierPath **)path2 theme:(SquirrelTheme *)theme highlightedRange:(NSRange)highlightedRange backgroundRect:(NSRect)backgroundRect preeditRect:(NSRect)preeditRect textField:(NSRect)textField extraExpansion:(CGFloat)extraExpansion {
+- (void)drawHighlighted:(NSBezierPath **)path theme:(SquirrelTheme *)theme highlightedRange:(NSRange)highlightedRange backgroundRect:(NSRect)backgroundRect preeditRect:(NSRect)preeditRect textField:(NSRect)textField extraExpansion:(CGFloat)extraExpansion {
   
   NSRect innerBox = backgroundRect;
   innerBox.size.width -= (theme.edgeInset.width + 1) * 2 - 2 * extraExpansion;
@@ -651,7 +651,8 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     if (highlightedPoints2.count > 0) {
       enlarge(highlightedPoints2, extraExpansion);
       expand(highlightedPoints2, innerBox, outerBox);
-      *path2 = drawSmoothLines(highlightedPoints2, 0.3*effectiveRadius, 1.4*effectiveRadius);
+      NSBezierPath *path2 = drawSmoothLines(highlightedPoints2, 0.3*effectiveRadius, 1.4*effectiveRadius);
+      [*path appendBezierPath:path2];
     }
   } else {
     NSRect highlightedRect = [self contentRectForRange:highlightedRange];
@@ -683,11 +684,8 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
   NSBezierPath *backgroundPath;
   NSBezierPath *borderPath;
   NSBezierPath *highlightedPath;
-  NSBezierPath *highlightedPath2;
   NSBezierPath *highlightedSurroundingPath;
-  NSBezierPath *highlightedSurroundingPath2;
   NSBezierPath *highlightedPreeditPath;
-  NSBezierPath *highlightedPreeditPath2;
   NSBezierPath *preeditPath;
   SquirrelTheme * theme = self.currentTheme;
 
@@ -715,12 +713,12 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
 
   // Draw highlighted Rect
   if (_highlightedRange.length > 0 && theme.highlightedStripColor != nil) {
-    [self drawHighlighted:&highlightedPath path2:&highlightedPath2 theme:theme highlightedRange:_highlightedRange backgroundRect:backgroundRect preeditRect:preeditRect textField:textField extraExpansion:0];
+    [self drawHighlighted:&highlightedPath theme:theme highlightedRange:_highlightedRange backgroundRect:backgroundRect preeditRect:preeditRect textField:textField extraExpansion:0];
   }
   
   // Draw surrounding highlighted Rect
   if (_highlightedSurroundingRange.length > 0 && theme.highlightedSurroundingStripColor != nil) {
-    [self drawHighlighted:&highlightedSurroundingPath path2:&highlightedSurroundingPath2 theme:theme highlightedRange:_highlightedSurroundingRange backgroundRect:backgroundRect preeditRect:preeditRect textField:textField extraExpansion:theme.surroundingExtraExpansion];
+    [self drawHighlighted:&highlightedSurroundingPath theme:theme highlightedRange:_highlightedSurroundingRange backgroundRect:backgroundRect preeditRect:preeditRect textField:textField extraExpansion:theme.surroundingExtraExpansion];
   }
 
   // Draw highlighted part of preedit text
@@ -759,7 +757,8 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     expand(highlightedPreeditPoints2, innerBox, outerBox);
     highlightedPreeditPath = drawSmoothLines(highlightedPreeditPoints, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
     if (highlightedPreeditPoints2.count > 0) {
-      highlightedPreeditPath2 = drawSmoothLines(highlightedPreeditPoints2, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
+      NSBezierPath *highlightedPreeditPath2 = drawSmoothLines(highlightedPreeditPoints2, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
+      [highlightedPreeditPath appendBezierPath:highlightedPreeditPath2];
     }
   }
 
@@ -777,9 +776,9 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
   // Calculate intersections.
   if (![highlightedPath isEmpty]) {
     [backgroundPath appendBezierPath:[highlightedPath copy]];
-    if (![highlightedPath2 isEmpty]) {
-      [backgroundPath appendBezierPath:[highlightedPath2 copy]];
-    }
+  }
+  if (![highlightedSurroundingPath isEmpty]) {
+    [backgroundPath appendBezierPath:[highlightedSurroundingPath copy]];
   }
 
   if (![preeditPath isEmpty]) {
@@ -791,13 +790,6 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
       [preeditPath appendBezierPath:[highlightedPreeditPath copy]];
     } else {
       [backgroundPath appendBezierPath:[highlightedPreeditPath copy]];
-    }
-    if (![highlightedPreeditPath2 isEmpty]) {
-      if (preeditPath != nil) {
-        [preeditPath appendBezierPath:[highlightedPreeditPath2 copy]];
-      } else {
-        [backgroundPath appendBezierPath:[highlightedPreeditPath2 copy]];
-      }
     }
   }
   [backgroundPath setWindingRule:NSEvenOddWindingRule];
@@ -813,23 +805,14 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
   if (theme.highlightedSurroundingStripColor && ![highlightedSurroundingPath isEmpty]) {
     [theme.highlightedSurroundingStripColor setFill];
     [highlightedSurroundingPath fill];
-    if (![highlightedSurroundingPath2 isEmpty]) {
-      [highlightedSurroundingPath2 fill];
-    }
   }
   if (theme.highlightedStripColor && ![highlightedPath isEmpty]) {
     [theme.highlightedStripColor setFill];
     [highlightedPath fill];
-    if (![highlightedPath2 isEmpty]) {
-      [highlightedPath2 fill];
-    }
   }
   if (theme.highlightedPreeditColor && ![highlightedPreeditPath isEmpty]) {
     [theme.highlightedPreeditColor setFill];
     [highlightedPreeditPath fill];
-    if (![highlightedPreeditPath2 isEmpty]) {
-      [highlightedPreeditPath2 fill];
-    }
   }
 
   if (theme.borderColor && (theme.borderWidth > 0)) {
@@ -1530,11 +1513,11 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
   
   NSString *candidateFormat = [config getString:@"style/candidate_format"];
   NSString *fontName = [config getString:@"style/font_face"];
-  NSInteger fontSize = [config getDouble:@"style/font_point"];
+  CGFloat fontSize = [config getDouble:@"style/font_point"];
   NSString *labelFontName = [config getString:@"style/label_font_face"];
-  NSInteger labelFontSize = [config getDouble:@"style/label_font_point"];
+  CGFloat labelFontSize = [config getDouble:@"style/label_font_point"];
   NSString *commentFontName = [config getString:@"style/comment_font_face"];
-  NSInteger commentFontSize = [config getDouble:@"style/comment_font_point"];
+  CGFloat commentFontSize = [config getDouble:@"style/comment_font_point"];
   CGFloat alpha = fmin(fmax([config getDouble:@"style/alpha"], 0.0), 1.0);
   CGFloat cornerRadius = [config getDouble:@"style/corner_radius"];
   CGFloat hilitedCornerRadius = [config getDouble:@"style/hilited_corner_radius"];
