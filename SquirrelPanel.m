@@ -1385,10 +1385,16 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
 
 - (void)showStatus:(NSString *)message {
   SquirrelTheme *theme = _view.currentTheme;
-  NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:message attributes:theme.commentAttrs];
+  NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:message.precomposedStringWithCanonicalMapping attributes:theme.attrs];
+  NSMutableParagraphStyle *statusStyle = [theme.paragraphStyle mutableCopy];
   if (theme.vertical) {
     convertToVerticalGlyph(text, NSMakeRange(0, text.length));
+    statusStyle.minimumLineHeight = minimumHeight(theme.attrs);
   }
+  [text addAttribute:NSParagraphStyleAttributeName
+               value:statusStyle
+               range:NSMakeRange(0, text.length)];
+  fixDefaultFont(text);
   [_view setText:text];
   NSRange emptyRange = NSMakeRange(NSNotFound, 0);
   [_view drawViewWith:[[NSArray alloc] init] hilightedIndex:0 preeditRange:emptyRange highlightedPreeditRange:emptyRange];
