@@ -347,7 +347,7 @@ double sign(double number) {
 }
 
 // Bezier cubic curve, which has continuous roundness
-NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, CGFloat alpha, CGFloat beta) {
+NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, NSSet<NSNumber *> * __nullable straightCorner, CGFloat alpha, CGFloat beta) {
   NSBezierPath *path = [NSBezierPath bezierPath];
   if (vertex.count < 1)
     return path;
@@ -358,10 +358,12 @@ NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, CGFloat alpha, CGFloat
   NSPoint control2;
   NSPoint target = previousPoint;
   NSPoint diff = NSMakePoint(point.x - previousPoint.x, point.y - previousPoint.y);
-  if (ABS(diff.x) >= ABS(diff.y)) {
-    target.x += sign(diff.x/beta)*beta;
-  } else {
-    target.y += sign(diff.y/beta)*beta;
+  if (!straightCorner || ![straightCorner containsObject:[NSNumber numberWithUnsignedInteger:vertex.count - 1]]) {
+    if (ABS(diff.x) >= ABS(diff.y)) {
+      target.x += sign(diff.x/beta)*beta;
+    } else {
+      target.y += sign(diff.y/beta)*beta;
+    }
   }
   [path moveToPoint:target];
   for (NSUInteger i = 0; i < vertex.count; i += 1) {
@@ -369,27 +371,31 @@ NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, CGFloat alpha, CGFloat
     point = [vertex[i] pointValue];
     nextPoint = [vertex[(i+1)%vertex.count] pointValue];
     target = point;
-    control1 = point;
-    diff = NSMakePoint(point.x - previousPoint.x, point.y - previousPoint.y);
-    if (ABS(diff.x) >= ABS(diff.y)) {
-      target.x -= sign(diff.x/beta)*beta;
-      control1.x -= sign(diff.x/beta)*alpha;
+    if (straightCorner && [straightCorner containsObject:[NSNumber numberWithUnsignedInteger:i]]) {
+      [path lineToPoint:target];
     } else {
-      target.y -= sign(diff.y/beta)*beta;
-      control1.y -= sign(diff.y/beta)*alpha;
+      control1 = point;
+      diff = NSMakePoint(point.x - previousPoint.x, point.y - previousPoint.y);
+      if (ABS(diff.x) >= ABS(diff.y)) {
+        target.x -= sign(diff.x/beta)*beta;
+        control1.x -= sign(diff.x/beta)*alpha;
+      } else {
+        target.y -= sign(diff.y/beta)*beta;
+        control1.y -= sign(diff.y/beta)*alpha;
+      }
+      [path lineToPoint:target];
+      target = point;
+      control2 = point;
+      diff = NSMakePoint(nextPoint.x - point.x, nextPoint.y - point.y);
+      if (ABS(diff.x) > ABS(diff.y)) {
+        control2.x += sign(diff.x/beta)*alpha;
+        target.x += sign(diff.x/beta)*beta;
+      } else {
+        control2.y += sign(diff.y/beta)*alpha;
+        target.y += sign(diff.y/beta)*beta;
+      }
+      [path curveToPoint:target controlPoint1:control1 controlPoint2:control2];
     }
-    [path lineToPoint:target];
-    target = point;
-    control2 = point;
-    diff = NSMakePoint(nextPoint.x - point.x, nextPoint.y - point.y);
-    if (ABS(diff.x) > ABS(diff.y)) {
-      control2.x += sign(diff.x/beta)*alpha;
-      target.x += sign(diff.x/beta)*beta;
-    } else {
-      control2.y += sign(diff.y/beta)*alpha;
-      target.y += sign(diff.y/beta)*beta;
-    }
-    [path curveToPoint:target controlPoint1:control1 controlPoint2:control2];
   }
   [path closePath];
   return path;
@@ -586,8 +592,48 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
   }
 }
 
-- (void)drawHighlighted:(NSBezierPath **)path theme:(SquirrelTheme *)theme highlightedRange:(NSRange)highlightedRange backgroundRect:(NSRect)backgroundRect preeditRect:(NSRect)preeditRect textField:(NSRect)textField extraExpansion:(CGFloat)extraExpansion {
+void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSNumber *> *rightCorners, NSRect containingRect) {
+  if (highlightedPoints && rightCorners) {
+    NSSet<NSNumber *> *originalRightCorners = [[NSSet<NSNumber *> alloc] initWithSet:rightCorners];
+    for (NSNumber *cornerIndex in originalRightCorners) {
+      NSUInteger index = cornerIndex.unsignedIntegerValue;
+      NSPoint corner = [highlightedPoints[index] pointValue];
+      CGFloat dist = MIN(NSMaxY(containingRect) - corner.y, corner.y - NSMinY(containingRect));
+      NSLog(@"%f", dist);
+      if (dist < 1e-2) {
+        [rightCorners removeObject:cornerIndex];
+      }
+    }
+  }
+}
+
+- (void) linearMultilineForRect:(NSRect)bodyRect leadingRect:(NSRect)leadingRect trailingRect:(NSRect)trailingRect points1:(NSMutableArray<NSValue *> **)highlightedPoints points2:(NSMutableArray<NSValue *> **)highlightedPoints2 rightCorners:(NSMutableSet<NSNumber *> **)rightCorners rightCorners2:(NSMutableSet<NSNumber *> **)rightCorners2 {
+  // Handles the special case where containing boxes are separated
+  if (nearEmptyRect(bodyRect) && !nearEmptyRect(leadingRect) && !nearEmptyRect(trailingRect) && NSMaxX(trailingRect) < NSMinX(leadingRect)) {
+    *highlightedPoints = [rectVertex(leadingRect) mutableCopy];
+    *highlightedPoints2 = [rectVertex(trailingRect) mutableCopy];
+    *rightCorners = [[NSMutableSet<NSNumber *> alloc] initWithObjects:@(2), @(3), nil];
+  } else {
+    *highlightedPoints = [multilineRectVertex(leadingRect, bodyRect, trailingRect) mutableCopy];
+    if (nearEmptyRect(bodyRect) && !nearEmptyRect(leadingRect) && !nearEmptyRect(trailingRect)) {
+      if (NSMaxX(trailingRect) < NSMaxX(leadingRect) && NSMinX(trailingRect) < NSMinX(leadingRect)) {
+        *rightCorners = [[NSMutableSet<NSNumber *> alloc] initWithObjects:@(0), @(1), @(4), @(5), nil];
+      }
+    }
+  }
+  if ([*highlightedPoints2 count] > 0) {
+    *rightCorners2 = [[NSMutableSet<NSNumber *> alloc] initWithObjects:@(0), @(1), nil];
+  }
+}
+
+- (void)drawHighlighted:(NSBezierPath **)path theme:(SquirrelTheme *)theme highlightedRange:(NSRange)highlightedRange backgroundRect:(NSRect)backgroundRect preeditRect:(NSRect)preeditRect containingRect:(NSRect)containingRect extraExpansion:(CGFloat)extraExpansion {
+  NSRect currentContainingRect = containingRect;
+  currentContainingRect.size.width += extraExpansion * 2;
+  currentContainingRect.size.height += extraExpansion * 2;
+  currentContainingRect.origin.x -= extraExpansion;
+  currentContainingRect.origin.y -= extraExpansion;
   
+  CGFloat halfLinespace = theme.linespace / 2;
   NSRect innerBox = backgroundRect;
   innerBox.size.width -= (theme.edgeInset.width + 1) * 2 - 2 * extraExpansion;
   innerBox.origin.x += theme.edgeInset.width + 1 - extraExpansion;
@@ -600,15 +646,15 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     innerBox.origin.y += preeditRect.size.height + theme.preeditLinespace / 2 + theme.hilitedCornerRadius / 2 + 1;
     innerBox.size.height -= theme.edgeInset.height + preeditRect.size.height + theme.preeditLinespace / 2 + theme.hilitedCornerRadius / 2 + 2;
   }
+  innerBox.size.height -= halfLinespace;
   NSRect outerBox = backgroundRect;
   outerBox.size.height -= theme.hilitedCornerRadius + preeditRect.size.height + theme.borderWidth - 2 * extraExpansion;
   outerBox.size.width -= theme.hilitedCornerRadius + theme.borderWidth  - 2 * extraExpansion;
   outerBox.origin.x += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2 - extraExpansion;
   outerBox.origin.y += theme.hilitedCornerRadius / 2 + preeditRect.size.height + theme.borderWidth / 2 - extraExpansion;
   
-  double effectiveRadius = (theme.hilitedCornerRadius + extraExpansion);
+  double effectiveRadius = MAX(0, theme.hilitedCornerRadius + 2 * extraExpansion / theme.hilitedCornerRadius * MAX(0, theme.cornerRadius - theme.hilitedCornerRadius));
 
-  CGFloat halfLinespace = theme.linespace / 2;
   if (theme.linear){
     NSRect leadingRect;
     NSRect bodyRect;
@@ -618,36 +664,33 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     [self addGapBetweenHorizontalCandidates:&leadingRect range:highlightedRange];
     [self addGapBetweenHorizontalCandidates:&bodyRect range:highlightedRange];
     [self addGapBetweenHorizontalCandidates:&trailingRect range:highlightedRange];
-
+    
     NSMutableArray<NSValue *> *highlightedPoints;
     NSMutableArray<NSValue *> *highlightedPoints2;
-    // Handles the special case where containing boxes are separated
-    if (nearEmptyRect(bodyRect) && !nearEmptyRect(leadingRect) && !nearEmptyRect(trailingRect) && NSMaxX(trailingRect) < NSMinX(leadingRect)) {
-      highlightedPoints = [rectVertex(leadingRect) mutableCopy];
-      highlightedPoints2 = [rectVertex(trailingRect) mutableCopy];
-    } else {
-      highlightedPoints = [multilineRectVertex(leadingRect, bodyRect, trailingRect) mutableCopy];
-    }
+    NSMutableSet<NSNumber *> *rightCorners;
+    NSMutableSet<NSNumber *> *rightCorners2;
+    [self linearMultilineForRect:bodyRect leadingRect:leadingRect trailingRect:trailingRect points1:&highlightedPoints points2:&highlightedPoints2 rightCorners:&rightCorners rightCorners2:&rightCorners2];
 
     xyTranslation(highlightedPoints, NSMakePoint(0, -halfLinespace));
     xyTranslation(highlightedPoints2, NSMakePoint(0, -halfLinespace));
-    innerBox.size.height -= halfLinespace;
     // Expand the boxes to reach proper border
     enlarge(highlightedPoints, extraExpansion);
     expand(highlightedPoints, innerBox, outerBox);
-    *path = drawSmoothLines(highlightedPoints, 0.3*effectiveRadius, 1.4*effectiveRadius);
+    removeCorner(highlightedPoints, rightCorners, currentContainingRect);
+
+    *path = drawSmoothLines(highlightedPoints, rightCorners, 0.3*effectiveRadius, 1.4*effectiveRadius);
     if (highlightedPoints2.count > 0) {
       enlarge(highlightedPoints2, extraExpansion);
       expand(highlightedPoints2, innerBox, outerBox);
-      NSBezierPath *path2 = drawSmoothLines(highlightedPoints2, 0.3*effectiveRadius, 1.4*effectiveRadius);
+      removeCorner(highlightedPoints2, rightCorners2, currentContainingRect);
+      NSBezierPath *path2 = drawSmoothLines(highlightedPoints2, rightCorners2, 0.3*effectiveRadius, 1.4*effectiveRadius);
       [*path appendBezierPath:path2];
     }
   } else {
     NSRect highlightedRect = [self contentRectForRange:highlightedRange];
-    highlightedRect.size.width = textField.size.width;
+    highlightedRect.size.width = backgroundRect.size.width;
     highlightedRect.size.height += theme.linespace;
-    highlightedRect.origin = NSMakePoint(textField.origin.x - theme.edgeInset.width,
-                                         highlightedRect.origin.y + theme.edgeInset.height - halfLinespace);
+    highlightedRect.origin = NSMakePoint(backgroundRect.origin.x, highlightedRect.origin.y + theme.edgeInset.height - halfLinespace);
     if (highlightedRange.location+highlightedRange.length == _text.length) {
       highlightedRect.size.height += theme.edgeInset.height - halfLinespace;
     }
@@ -663,7 +706,7 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     NSMutableArray<NSValue *> *highlightedPoints = [rectVertex(highlightedRect) mutableCopy];
     enlarge(highlightedPoints, extraExpansion);
     expand(highlightedPoints, innerBox, outerBox);
-    *path = drawSmoothLines(highlightedPoints, 0.3*effectiveRadius, 1.4*effectiveRadius);
+    *path = drawSmoothLines(highlightedPoints, nil, 0.3*effectiveRadius, 1.4*effectiveRadius);
   }
 }
 
@@ -677,25 +720,30 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
   NSBezierPath *preeditPath;
   SquirrelTheme * theme = self.currentTheme;
 
-  NSRect textField = dirtyRect;
-  textField.origin.y += theme.edgeInset.height;
-  textField.origin.x += theme.edgeInset.width;
+  NSPoint textFieldOrigin = dirtyRect.origin;
+  textFieldOrigin.y += theme.edgeInset.height;
+  textFieldOrigin.x += theme.edgeInset.width;
 
   // Draw preedit Rect
   NSRect backgroundRect = dirtyRect;
+  NSRect containingRect = dirtyRect;
+  containingRect.size.height -= theme.hilitedCornerRadius + theme.borderWidth;
+  containingRect.size.width -= theme.hilitedCornerRadius + theme.borderWidth;
+  containingRect.origin.x += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
+  containingRect.origin.y += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
 
   // Draw preedit Rect
   NSRect preeditRect = NSZeroRect;
   if (_preeditRange.length > 0) {
     preeditRect = [self contentRectForRange:_preeditRange];
-    preeditRect.size.width = textField.size.width;
+    preeditRect.size.width = backgroundRect.size.width;
     preeditRect.size.height += theme.edgeInset.height + theme.preeditLinespace / 2 + theme.hilitedCornerRadius / 2;
-    preeditRect.origin = NSMakePoint(textField.origin.x - theme.edgeInset.width, textField.origin.y - theme.edgeInset.height);
+    preeditRect.origin = backgroundRect.origin;
     if (_candidateRanges.count == 0) {
       preeditRect.size.height += theme.edgeInset.height - theme.preeditLinespace / 2 - theme.hilitedCornerRadius / 2;
     }
     if (theme.preeditBackgroundColor != nil) {
-      preeditPath = drawSmoothLines(rectVertex(preeditRect), 0, 0);
+      preeditPath = drawSmoothLines(rectVertex(preeditRect), nil, 0, 0);
     }
   }
 
@@ -705,13 +753,13 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     if (i == _hilightedIndex) {
       // Draw highlighted Rect
       if (candidateRange.length > 0 && theme.highlightedBackColor != nil) {
-        [self drawHighlighted:&highlightedPath theme:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect textField:textField extraExpansion:0];
+        [self drawHighlighted:&highlightedPath theme:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect containingRect:containingRect extraExpansion:0];
       }
     } else {
       // Draw other highlighted Rect
       if (candidateRange.length > 0 && theme.candidateBackColor != nil) {
         NSBezierPath *candidatePath;
-        [self drawHighlighted:&candidatePath theme:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect textField:textField extraExpansion:theme.surroundingExtraExpansion];
+        [self drawHighlighted:&candidatePath theme:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect containingRect:containingRect extraExpansion:theme.surroundingExtraExpansion];
         if (!candidatePaths) {
           candidatePaths = [NSBezierPath bezierPath];
         }
@@ -722,11 +770,6 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
 
   // Draw highlighted part of preedit text
   if (_highlightedPreeditRange.length > 0 && theme.highlightedPreeditColor != nil) {
-    NSRect leadingRect;
-    NSRect bodyRect;
-    NSRect trailingRect;
-    [self multilineRectForRange:_highlightedPreeditRange leadingRect:&leadingRect bodyRect:&bodyRect trailingRect:&trailingRect];
-
     NSRect innerBox = preeditRect;
     innerBox.size.width -= (theme.edgeInset.width + 1) * 2;
     innerBox.origin.x += theme.edgeInset.width + 1;
@@ -734,35 +777,40 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     if (_candidateRanges.count == 0) {
       innerBox.size.height -= (theme.edgeInset.height + 1) * 2;
     } else {
-      innerBox.size.height -= theme.edgeInset.height + theme.preeditLinespace + theme.hilitedCornerRadius / 2 + 2;
+      innerBox.size.height -= theme.edgeInset.height + theme.preeditLinespace / 2 + theme.hilitedCornerRadius / 2 + 2;
     }
     NSRect outerBox = preeditRect;
-    outerBox.size.height -= theme.hilitedCornerRadius;
-    outerBox.size.width -= theme.hilitedCornerRadius;
-    outerBox.origin.x += theme.hilitedCornerRadius / 2;
-    outerBox.origin.y += theme.hilitedCornerRadius / 2;
-
+    outerBox.size.height -= theme.hilitedCornerRadius + theme.borderWidth;
+    outerBox.size.width -= theme.hilitedCornerRadius + theme.borderWidth;
+    outerBox.origin.x += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
+    outerBox.origin.y += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
+    
+    NSRect leadingRect;
+    NSRect bodyRect;
+    NSRect trailingRect;
+    [self multilineRectForRange:_highlightedPreeditRange leadingRect:&leadingRect bodyRect:&bodyRect trailingRect:&trailingRect];
+    
     NSMutableArray<NSValue *> *highlightedPreeditPoints;
     NSMutableArray<NSValue *> *highlightedPreeditPoints2;
-    // Handles the special case where containing boxes are separated
-    if (nearEmptyRect(bodyRect) && !nearEmptyRect(leadingRect) && !nearEmptyRect(trailingRect) && NSMaxX(trailingRect) < NSMinX(leadingRect)) {
-      highlightedPreeditPoints = [rectVertex(leadingRect) mutableCopy];
-      highlightedPreeditPoints2 = [rectVertex(trailingRect) mutableCopy];
-    } else {
-      highlightedPreeditPoints = [multilineRectVertex(leadingRect, bodyRect, trailingRect) mutableCopy];
-    }
-    // Expand the boxes to reach proper border
+    NSMutableSet<NSNumber *> *rightCorners;
+    NSMutableSet<NSNumber *> *rightCorners2;
+    [self linearMultilineForRect:bodyRect leadingRect:leadingRect trailingRect:trailingRect points1:&highlightedPreeditPoints points2:&highlightedPreeditPoints2 rightCorners:&rightCorners rightCorners2:&rightCorners2];
+    
+    enlarge(highlightedPreeditPoints, 0);
     expand(highlightedPreeditPoints, innerBox, outerBox);
-    expand(highlightedPreeditPoints2, innerBox, outerBox);
-    highlightedPreeditPath = drawSmoothLines(highlightedPreeditPoints, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
+    removeCorner(highlightedPreeditPoints, rightCorners, containingRect);
+    highlightedPreeditPath = drawSmoothLines(highlightedPreeditPoints, rightCorners, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
     if (highlightedPreeditPoints2.count > 0) {
-      NSBezierPath *highlightedPreeditPath2 = drawSmoothLines(highlightedPreeditPoints2, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
+      enlarge(highlightedPreeditPoints2, 0);
+      expand(highlightedPreeditPoints2, innerBox, outerBox);
+      removeCorner(highlightedPreeditPoints2, rightCorners2, containingRect);
+      NSBezierPath *highlightedPreeditPath2 = drawSmoothLines(highlightedPreeditPoints2, rightCorners2, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
       [highlightedPreeditPath appendBezierPath:highlightedPreeditPath2];
     }
   }
 
   [NSBezierPath setDefaultLineWidth:0];
-  backgroundPath = drawSmoothLines(rectVertex(backgroundRect), theme.cornerRadius*0.3, theme.cornerRadius*1.4);
+  backgroundPath = drawSmoothLines(rectVertex(backgroundRect), nil, theme.cornerRadius*0.3, theme.cornerRadius*1.4);
   _shape.path = backgroundPath.quartzPath;
   // Nothing should extend beyond backgroundPath
   borderPath = [backgroundPath copy];
@@ -819,7 +867,7 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
     [borderPath stroke];
   }
   NSRange glyphRange = [_text.layoutManagers[0] glyphRangeForTextContainer:_text.layoutManagers[0].textContainers[0]];
-  [_text.layoutManagers[0] drawGlyphsForGlyphRange:glyphRange atPoint:textField.origin];
+  [_text.layoutManagers[0] drawGlyphsForGlyphRange:glyphRange atPoint:textFieldOrigin];
 }
 
 @end
@@ -1833,9 +1881,9 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
 
   NSSize edgeInset;
   if (vertical) {
-    edgeInset = NSMakeSize(MAX(borderHeight, cornerRadius), MAX(borderWidth, cornerRadius));
+    edgeInset = NSMakeSize(borderHeight + cornerRadius, borderWidth + cornerRadius);
   } else {
-    edgeInset = NSMakeSize(MAX(borderWidth, cornerRadius), MAX(borderHeight, cornerRadius));
+    edgeInset = NSMakeSize(borderWidth + cornerRadius, borderHeight + cornerRadius);
   }
 
   [theme setCornerRadius:cornerRadius
