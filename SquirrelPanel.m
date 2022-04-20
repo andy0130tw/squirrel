@@ -58,6 +58,7 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 @interface SquirrelTheme : NSObject
 
 @property(nonatomic, assign) BOOL native;
+@property(nonatomic, assign) BOOL memorizeSize;
 
 @property(nonatomic, strong, readonly) NSColor *backgroundColor;
 @property(nonatomic, strong, readonly) NSColor *highlightedStripColor;
@@ -944,6 +945,7 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
 - (void)initializeUIStyleForDarkMode:(BOOL)isDark {
   SquirrelTheme *theme = [_view selectTheme:isDark];
   theme.native = YES;
+  theme.memorizeSize = YES;
   theme.candidateFormat = kDefaultCandidateFormat;
 
   NSColor *secondaryTextColor = [[self class] secondaryTextColor];
@@ -1074,8 +1076,8 @@ commentHighlightedSrdAttrs:[commentAttrs mutableCopy]
   NSRect windowRect;
   // in vertical mode, the width and height are interchanged
   NSRect contentRect = _view.contentRect;
-  if ((theme.vertical && NSMidY(_position) / NSHeight(_screenRect) < 0.5) ||
-      (!theme.vertical && NSMinX(_position)+MAX(contentRect.size.width, _maxHeight)+theme.edgeInset.width*2 > NSMaxX(_screenRect))) {
+  if (theme.memorizeSize && ((theme.vertical && NSMidY(_position) / NSHeight(_screenRect) < 0.5) ||
+      (!theme.vertical && NSMinX(_position)+MAX(contentRect.size.width, _maxHeight)+theme.edgeInset.width*2 > NSMaxX(_screenRect)))) {
     if (contentRect.size.width >= _maxHeight) {
       _maxHeight = contentRect.size.width;
     } else {
@@ -1521,8 +1523,12 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
   BOOL inlinePreedit = [config getBool:@"style/inline_preedit"];
   BOOL inlineCandidate = [config getBool:@"style/inline_candidate"];
   BOOL translucency = [config getBool:@"style/translucency"];
+  NSNumber *memorizeSizeConfig = [config getOptionalBool:@"style/memorize_size"];
+  if (memorizeSizeConfig) {
+    theme.memorizeSize = memorizeSizeConfig.boolValue;
+  }
+  
   NSString *candidateFormat = [config getString:@"style/candidate_format"];
-
   NSString *fontName = [config getString:@"style/font_face"];
   NSInteger fontSize = [config getDouble:@"style/font_point"];
   NSString *labelFontName = [config getString:@"style/label_font_face"];
