@@ -434,6 +434,7 @@ BOOL nearEmptyRect(NSRect rect) {
   *leadingRect = NSZeroRect;
   *bodyRect = boundingRect;
   *trailingRect = NSZeroRect;
+  // Multiline, not starting from beginning
   if (boundingRect.origin.x <= 1 && fullRangeInBoundingRect.location < glyphRange.location) {
     *leadingRect = [layoutManager boundingRectForGlyphRange:NSMakeRange(fullRangeInBoundingRect.location, glyphRange.location-fullRangeInBoundingRect.location) inTextContainer:textContainer];
     if (!nearEmptyRect(*leadingRect)) {
@@ -442,11 +443,12 @@ BOOL nearEmptyRect(NSRect rect) {
     }
     double rightEdge = NSMaxX(*leadingRect);
     leadingRect->origin.x = rightEdge;
-    leadingRect->size.width = bodyRect->origin.x + bodyRect->size.width - rightEdge;
+    leadingRect->size.width = NSMaxX(*bodyRect) - rightEdge;
   }
-  if (fullRangeInBoundingRect.location+fullRangeInBoundingRect.length > glyphRange.location+glyphRange.length) {
+  // Has trainling characters
+  if (NSMaxRange(fullRangeInBoundingRect) > NSMaxRange(glyphRange)) {
     *trailingRect = [layoutManager boundingRectForGlyphRange:
-                    NSMakeRange(glyphRange.location+glyphRange.length, fullRangeInBoundingRect.location+fullRangeInBoundingRect.length-glyphRange.location-glyphRange.length)
+                    NSMakeRange(NSMaxRange(glyphRange), NSMaxRange(fullRangeInBoundingRect)-NSMaxRange(glyphRange))
                                                       inTextContainer:textContainer];
     if (!nearEmptyRect(*trailingRect)) {
       bodyRect->size.height -= trailingRect->size.height;
@@ -454,8 +456,9 @@ BOOL nearEmptyRect(NSRect rect) {
     double leftEdge = NSMinX(*trailingRect);
     trailingRect->origin.x = bodyRect->origin.x;
     trailingRect->size.width = leftEdge - bodyRect->origin.x;
-  } else if (fullRangeInBoundingRect.location+fullRangeInBoundingRect.length == glyphRange.location+glyphRange.length) {
-    *trailingRect = [layoutManager lineFragmentUsedRectForGlyphAtIndex:glyphRange.location+glyphRange.length-1 effectiveRange:NULL];
+  // Has no trainling charcater
+  } else if (NSMaxRange(fullRangeInBoundingRect) == NSMaxRange(glyphRange)) {
+    *trailingRect = [layoutManager lineFragmentUsedRectForGlyphAtIndex:NSMaxRange(glyphRange)-1 effectiveRange:NULL];
     if (NSMaxX(*trailingRect) >= NSMaxX(boundingRect) - 1) {
       *trailingRect = NSZeroRect;
     } else if (!nearEmptyRect(*trailingRect)) {
@@ -468,9 +471,9 @@ BOOL nearEmptyRect(NSRect rect) {
   NSGlyphProperty glyphProperty = [layoutManager propertyForGlyphAtIndex:lastLineRange.location+lastLineRange.length-1];
   while (lastLineRange.length>0 && (glyphProperty == NSGlyphPropertyElastic || glyphProperty == NSGlyphPropertyControlCharacter)) {
     lastLineRange.length -= 1;
-    glyphProperty = [layoutManager propertyForGlyphAtIndex:lastLineRange.location+lastLineRange.length-1];
+    glyphProperty = [layoutManager propertyForGlyphAtIndex:NSMaxRange(lastLineRange)-1];
   }
-  if (lastLineRange.location+lastLineRange.length == glyphRange.location+glyphRange.length) {
+  if (NSMaxRange(lastLineRange) == NSMaxRange(glyphRange)) {
     if (!nearEmptyRect(*trailingRect)) {
       *trailingRect = lastLineRect;
     } else {
@@ -599,7 +602,6 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
       NSUInteger index = cornerIndex.unsignedIntegerValue;
       NSPoint corner = [highlightedPoints[index] pointValue];
       CGFloat dist = MIN(NSMaxY(containingRect) - corner.y, corner.y - NSMinY(containingRect));
-      NSLog(@"%f", dist);
       if (dist < 1e-2) {
         [rightCorners removeObject:cornerIndex];
       }
@@ -618,6 +620,8 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     if (nearEmptyRect(bodyRect) && !nearEmptyRect(leadingRect) && !nearEmptyRect(trailingRect)) {
       if (NSMaxX(trailingRect) < NSMaxX(leadingRect) && NSMinX(trailingRect) < NSMinX(leadingRect)) {
         *rightCorners = [[NSMutableSet<NSNumber *> alloc] initWithObjects:@(0), @(1), @(4), @(5), nil];
+      } else if (NSMaxX(trailingRect) >= NSMaxX(leadingRect) && NSMinX(trailingRect) < NSMinX(leadingRect)) {
+        *rightCorners = [[NSMutableSet<NSNumber *> alloc] initWithObjects:@(0), @(1), nil];
       }
     }
   }
