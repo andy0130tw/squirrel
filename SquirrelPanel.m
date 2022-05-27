@@ -1560,7 +1560,8 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
   CGFloat labelFontSize = [config getDouble:@"style/label_font_point"];
   NSString *commentFontName = [config getString:@"style/comment_font_face"];
   CGFloat commentFontSize = [config getDouble:@"style/comment_font_point"];
-  CGFloat alpha = fmin(fmax([config getDouble:@"style/alpha"], 0.0), 1.0);
+  NSNumber *alphaValue = [config getOptionalDouble:@"style/alpha"];
+  CGFloat alpha = alphaValue ? fmin(fmax(alphaValue.doubleValue, 0.0), 1.0) : 1.0;
   CGFloat cornerRadius = [config getDouble:@"style/corner_radius"];
   CGFloat hilitedCornerRadius = [config getDouble:@"style/hilited_corner_radius"];
   CGFloat surroundingExtraExpansion = [config getDouble:@"style/surrounding_extra_expansion"];
