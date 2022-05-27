@@ -466,7 +466,7 @@ BOOL nearEmptyRect(NSRect rect) {
     }
   }
   NSRect lastLineRect = nearEmptyRect(*trailingRect) ? *bodyRect : *trailingRect;
-  lastLineRect.size.width = textContainer.containerSize.width - lastLineRect.origin.x;
+//  lastLineRect.size.width = textContainer.containerSize.width - lastLineRect.origin.x;
   NSRange lastLineRange = [layoutManager glyphRangeForBoundingRect:lastLineRect inTextContainer:textContainer];
   NSGlyphProperty glyphProperty = [layoutManager propertyForGlyphAtIndex:lastLineRange.location+lastLineRange.length-1];
   while (lastLineRange.length>0 && (glyphProperty == NSGlyphPropertyElastic || glyphProperty == NSGlyphPropertyControlCharacter)) {
@@ -578,9 +578,9 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
 
 // Add gap between horizontal candidates
 - (void)addGapBetweenHorizontalCandidates:(NSRect *)rect range:(NSRange)highlightedRange {
-  if (highlightedRange.location+highlightedRange.length == _text.length) {
+  if (NSMaxRange(highlightedRange) == _text.length) {
     if (!nearEmptyRect(*rect)) {
-      rect->size.width += _seperatorWidth / 2;
+      rect->size.width += _seperatorWidth;
       rect->origin.x -= _seperatorWidth / 2;
     }
   } else if (highlightedRange.location - ((_preeditRange.location == NSNotFound ? 0 : _preeditRange.location)+_preeditRange.length) <= 1) {
@@ -1897,7 +1897,7 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
              borderWidth:MIN(borderHeight, borderWidth)
                linespace:lineSpacing
         preeditLinespace:spacing
-                   alpha:(alpha == 0 ? 1.0 : alpha)
+                   alpha:alpha
             translucency:translucency
                   linear:linear
                 vertical:vertical
