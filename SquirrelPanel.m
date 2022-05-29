@@ -695,7 +695,7 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     highlightedRect.size.width = backgroundRect.size.width;
     highlightedRect.size.height += theme.linespace;
     highlightedRect.origin = NSMakePoint(backgroundRect.origin.x, highlightedRect.origin.y + theme.edgeInset.height - halfLinespace);
-    if (highlightedRange.location+highlightedRange.length == _text.length) {
+    if (NSMaxRange(highlightedRange) == _text.length) {
       highlightedRect.size.height += theme.edgeInset.height - halfLinespace;
     }
     if (highlightedRange.location - ((_preeditRange.location == NSNotFound ? 0 : _preeditRange.location)+_preeditRange.length) <= 1) {
@@ -800,12 +800,10 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     NSMutableSet<NSNumber *> *rightCorners2;
     [self linearMultilineForRect:bodyRect leadingRect:leadingRect trailingRect:trailingRect points1:&highlightedPreeditPoints points2:&highlightedPreeditPoints2 rightCorners:&rightCorners rightCorners2:&rightCorners2];
     
-    enlarge(highlightedPreeditPoints, 0);
     expand(highlightedPreeditPoints, innerBox, outerBox);
     removeCorner(highlightedPreeditPoints, rightCorners, containingRect);
     highlightedPreeditPath = drawSmoothLines(highlightedPreeditPoints, rightCorners, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
     if (highlightedPreeditPoints2.count > 0) {
-      enlarge(highlightedPreeditPoints2, 0);
       expand(highlightedPreeditPoints2, innerBox, outerBox);
       removeCorner(highlightedPreeditPoints2, rightCorners2, containingRect);
       NSBezierPath *highlightedPreeditPath2 = drawSmoothLines(highlightedPreeditPoints2, rightCorners2, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
@@ -1397,13 +1395,10 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
                                             attributes:attrs];
     _view.seperatorWidth = [separator boundingRectWithSize:NSZeroSize options:0].size.width;
 
-    NSMutableParagraphStyle *paragraphStyleCandidate;
+    NSMutableParagraphStyle *paragraphStyleCandidate = [theme.paragraphStyle mutableCopy];
     if (i == 0) {
-      NSMutableParagraphStyle *firstParagraphStyle = [theme.paragraphStyle mutableCopy];
-      firstParagraphStyle.paragraphSpacingBefore = theme.preeditLinespace / 2 + theme.hilitedCornerRadius / 2;
-      paragraphStyleCandidate = firstParagraphStyle;
+      paragraphStyleCandidate.paragraphSpacingBefore = theme.preeditLinespace / 2 + theme.hilitedCornerRadius / 2;
     } else {
-      paragraphStyleCandidate = [theme.paragraphStyle mutableCopy];
       [text appendAttributedString:separator];
     }
     if (theme.linear) {
