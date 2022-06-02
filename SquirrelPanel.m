@@ -9,52 +9,6 @@ static const CGFloat kBlendedBackgroundColorFraction = 1.0 / 5;
 static const NSTimeInterval kShowStatusDuration = 1.2;
 static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 
-@implementation NSBezierPath (BezierPathQuartzUtilities)
-// This method works only in OS X v10.2 and later.
-- (CGPathRef)quartzPath {
-  NSInteger i, numElements;
-  // Need to begin a path here.
-  CGPathRef immutablePath = NULL;
-
-  // Then draw the path elements.
-  numElements = [self elementCount];
-  if (numElements > 0) {
-    CGMutablePathRef path = CGPathCreateMutable();
-    NSPoint points[3];
-    BOOL didClosePath = YES;
-    for (i = 0; i < numElements; i++) {
-      switch ([self elementAtIndex:i associatedPoints:points]) {
-      case NSMoveToBezierPathElement:
-        CGPathMoveToPoint(path, NULL, points[0].x, points[0].y);
-        break;
-      case NSLineToBezierPathElement:
-        CGPathAddLineToPoint(path, NULL, points[0].x, points[0].y);
-        didClosePath = NO;
-        break;
-      case NSCurveToBezierPathElement:
-        CGPathAddCurveToPoint(path, NULL, points[0].x, points[0].y,
-                              points[1].x, points[1].y,
-                              points[2].x, points[2].y);
-        didClosePath = NO;
-        break;
-      case NSClosePathBezierPathElement:
-        CGPathCloseSubpath(path);
-        didClosePath = YES;
-        break;
-      }
-    }
-
-      // Be sure the path is closed or Quartz may not do valid hit detection.
-    if (!didClosePath) {
-        CGPathCloseSubpath(path);
-    }
-    immutablePath = CGPathCreateCopy(path);
-    CGPathRelease(path);
-  }
-  return immutablePath;
-}
-@end
-
 @interface SquirrelTheme : NSObject
 
 @property(nonatomic, assign) BOOL native;
@@ -70,12 +24,14 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 @property(nonatomic, readonly) CGFloat cornerRadius;
 @property(nonatomic, readonly) CGFloat hilitedCornerRadius;
 @property(nonatomic, readonly) CGFloat surroundingExtraExpansion;
+@property(nonatomic, readonly) CGFloat shadowSize;
 @property(nonatomic, readonly) NSSize edgeInset;
 @property(nonatomic, readonly) CGFloat borderWidth;
 @property(nonatomic, readonly) CGFloat linespace;
 @property(nonatomic, readonly) CGFloat preeditLinespace;
 @property(nonatomic, readonly) CGFloat alpha;
 @property(nonatomic, readonly) BOOL translucency;
+@property(nonatomic, readonly) BOOL mutualExclusive;
 @property(nonatomic, readonly) BOOL linear;
 @property(nonatomic, readonly) BOOL vertical;
 @property(nonatomic, readonly) BOOL inlinePreedit;
@@ -106,12 +62,14 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 - (void)setCornerRadius:(CGFloat)cornerRadius
     hilitedCornerRadius:(CGFloat)hilitedCornerRadius
       srdExtraExpansion:(CGFloat)surroundingExtraExpansion
+             shadowSize:(CGFloat)shadowSize
               edgeInset:(NSSize)edgeInset
             borderWidth:(CGFloat)borderWidth
               linespace:(CGFloat)linespace
        preeditLinespace:(CGFloat)preeditLinespace
                   alpha:(CGFloat)alpha
            translucency:(BOOL)translucency
+        mutualExclusive:(BOOL)mutualExclusive
                  linear:(BOOL)linear
                vertical:(BOOL)vertical
           inlinePreedit:(BOOL)inlinePreedit
@@ -176,12 +134,14 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 - (void)setCornerRadius:(double)cornerRadius
     hilitedCornerRadius:(double)hilitedCornerRadius
       srdExtraExpansion:(double)surroundingExtraExpansion
+             shadowSize:(double)shadowSize
               edgeInset:(NSSize)edgeInset
             borderWidth:(double)borderWidth
               linespace:(double)linespace
        preeditLinespace:(double)preeditLinespace
-                  alpha:(CGFloat)alpha
+                  alpha:(double)alpha
            translucency:(BOOL)translucency
+        mutualExclusive:(BOOL)mutualExclusive
                  linear:(BOOL)linear
                vertical:(BOOL)vertical
           inlinePreedit:(BOOL)inlinePreedit
@@ -189,11 +149,13 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
   _cornerRadius = cornerRadius;
   _hilitedCornerRadius = hilitedCornerRadius;
   _surroundingExtraExpansion = surroundingExtraExpansion;
+  _shadowSize = shadowSize;
   _edgeInset = edgeInset;
   _borderWidth = borderWidth;
   _linespace = linespace;
   _alpha = alpha;
   _translucency = translucency;
+  _mutualExclusive = mutualExclusive;
   _preeditLinespace = preeditLinespace;
   _linear = linear;
   _vertical = vertical;
@@ -227,9 +189,54 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 
 @end
 
+@interface SquirrelTextView : NSView
+
+@property(nonatomic, readonly) NSTextStorage *text;
+@property(nonatomic, readonly) NSPoint origin;
+- (void)drawText:(NSTextStorage *)text
+              at:(NSPoint)origin;
+
+@end
+
+@implementation SquirrelTextView
+
+// Need flipped coordinate system, as required by textStorage
+- (BOOL)isFlipped {
+  return YES;
+}
+
+- (instancetype)initWithFrame:(NSRect)frameRect {
+  self = [super initWithFrame:frameRect];
+  // Use textStorage to store text and manage all text layout and draws
+  NSTextContainer *textContainer = [[NSTextContainer alloc] initWithSize:NSZeroSize];
+  textContainer.lineFragmentPadding = 0.0;
+  NSLayoutManager *layoutManager = [[NSLayoutManager alloc] init];
+  [layoutManager addTextContainer:textContainer];
+  _text = [[NSTextStorage alloc] init];
+  [_text addLayoutManager:layoutManager];
+  layoutManager.backgroundLayoutEnabled = YES;
+  return self;
+}
+
+- (void)drawText:(NSTextStorage *)text
+              at:(NSPoint)origin {
+  [_text setAttributedString:text];
+  _text.layoutManagers[0].textContainers[0].containerSize = text.layoutManagers[0].textContainers[0].containerSize;
+  _origin = origin;
+  self.needsDisplay = YES;
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+  NSRange glyphRange = [_text.layoutManagers[0] glyphRangeForTextContainer:_text.layoutManagers[0].textContainers[0]];
+  [_text.layoutManagers[0] drawGlyphsForGlyphRange:glyphRange atPoint:_origin];
+}
+
+@end
+
 @interface SquirrelView : NSView
 
 @property(nonatomic, readonly) NSTextStorage *text;
+@property(nonatomic, readonly) SquirrelTextView *textView;
 @property(nonatomic, readonly) NSArray<NSValue *> *candidateRanges;
 @property(nonatomic, readonly) NSInteger hilightedIndex;
 @property(nonatomic, readonly) NSRange preeditRange;
@@ -240,7 +247,6 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 @property(nonatomic, assign) CGFloat seperatorWidth;
 @property(nonatomic, readonly) CAShapeLayer *shape;
 
-- (BOOL)isFlipped;
 - (void)setText:(NSAttributedString *)text;
 - (void)         drawViewWith:(NSArray<NSValue *> *)candidateRanges
                hilightedIndex:(NSInteger)hilightedIndex
@@ -290,6 +296,7 @@ SquirrelTheme *_darkTheme;
   _text = [[NSTextStorage alloc] init];
   [_text addLayoutManager:layoutManager];
   layoutManager.backgroundLayoutEnabled = YES;
+  _textView = [[SquirrelTextView alloc] initWithFrame:frameRect];
   _defaultTheme = [[SquirrelTheme alloc] init];
   if (@available(macOS 10.14, *)) {
     _darkTheme = [[SquirrelTheme alloc] init];
@@ -304,11 +311,22 @@ SquirrelTheme *_darkTheme;
   NSRect rect = [_text.layoutManagers[0] boundingRectForGlyphRange:glyphRange inTextContainer:_text.layoutManagers[0].textContainers[0]];
   __block long actualWidth = 0;
   [_text.layoutManagers[0] enumerateLineFragmentsForGlyphRange:glyphRange usingBlock:^(CGRect rect, CGRect usedRect, NSTextContainer *textContainer, NSRange glyphRange, BOOL *stop) {
-    if (usedRect.size.width > actualWidth) {
-      actualWidth = usedRect.size.width;
+    NSRange range = [self.text.layoutManagers[0] characterRangeForGlyphRange:glyphRange actualGlyphRange:NULL];
+    NSAttributedString *str = [self.text attributedSubstringFromRange:range];
+    NSRange nonWhiteRange = [str.string rangeOfCharacterFromSet:NSCharacterSet.whitespaceCharacterSet.invertedSet options:NSBackwardsSearch];
+    if (nonWhiteRange.location != NSNotFound) {
+      NSRange newRange = NSMakeRange(range.location, nonWhiteRange.location+1);
+      NSRange actualRange = NSMakeRange(NSNotFound, 0);
+      [self.text.layoutManagers[0] glyphRangeForCharacterRange:newRange actualCharacterRange:&actualRange];
+      CGFloat width = [self.text attributedSubstringFromRange:actualRange].size.width;
+      if (width > actualWidth) {
+        actualWidth = width;
+      }
     }
   }];
-  rect.size.width = actualWidth;
+  if (actualWidth > 0) {
+    rect.size.width = actualWidth;
+  }
   return rect;
 }
 
@@ -347,8 +365,8 @@ double sign(double number) {
 }
 
 // Bezier cubic curve, which has continuous roundness
-NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, NSSet<NSNumber *> * __nullable straightCorner, CGFloat alpha, CGFloat beta) {
-  NSBezierPath *path = [NSBezierPath bezierPath];
+CGMutablePathRef drawSmoothLines(NSArray<NSValue *> *vertex, NSSet<NSNumber *> * __nullable straightCorner, CGFloat alpha, CGFloat beta) {
+  CGMutablePathRef path = CGPathCreateMutable();
   if (vertex.count < 1)
     return path;
   NSPoint previousPoint = [vertex[vertex.count-1] pointValue];
@@ -365,14 +383,14 @@ NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, NSSet<NSNumber *> * __
       target.y += sign(diff.y/beta)*beta;
     }
   }
-  [path moveToPoint:target];
+  CGPathMoveToPoint(path, NULL, target.x, target.y);
   for (NSUInteger i = 0; i < vertex.count; i += 1) {
     previousPoint = [vertex[(vertex.count+i-1)%vertex.count] pointValue];
     point = [vertex[i] pointValue];
     nextPoint = [vertex[(i+1)%vertex.count] pointValue];
     target = point;
     if (straightCorner && [straightCorner containsObject:[NSNumber numberWithUnsignedInteger:i]]) {
-      [path lineToPoint:target];
+      CGPathAddLineToPoint(path, NULL, target.x, target.y);
     } else {
       control1 = point;
       diff = NSMakePoint(point.x - previousPoint.x, point.y - previousPoint.y);
@@ -383,7 +401,7 @@ NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, NSSet<NSNumber *> * __
         target.y -= sign(diff.y/beta)*beta;
         control1.y -= sign(diff.y/beta)*alpha;
       }
-      [path lineToPoint:target];
+      CGPathAddLineToPoint(path, NULL, target.x, target.y);
       target = point;
       control2 = point;
       diff = NSMakePoint(nextPoint.x - point.x, nextPoint.y - point.y);
@@ -394,10 +412,10 @@ NSBezierPath *drawSmoothLines(NSArray<NSValue *> *vertex, NSSet<NSNumber *> * __
         control2.y += sign(diff.y/beta)*alpha;
         target.y += sign(diff.y/beta)*beta;
       }
-      [path curveToPoint:target controlPoint1:control1 controlPoint2:control2];
+      CGPathAddCurveToPoint(path, NULL, control1.x, control1.y, control2.x, control2.y, target.x, target.y);
     }
   }
-  [path closePath];
+  CGPathCloseSubpath(path);
   return path;
 }
 
@@ -551,6 +569,13 @@ CGPoint direction(CGPoint diff) {
   }
 }
 
+CAShapeLayer *shapeFromPath(CGPathRef path) {
+  CAShapeLayer *layer = [CAShapeLayer layer];
+  layer.path = path;
+  layer.fillRule = kCAFillRuleEvenOdd;
+  return layer;
+}
+
 // Assumes clockwise iteration
 void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
   if (by != 0) {
@@ -630,7 +655,7 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
   }
 }
 
-- (void)drawHighlighted:(NSBezierPath **)path theme:(SquirrelTheme *)theme highlightedRange:(NSRange)highlightedRange backgroundRect:(NSRect)backgroundRect preeditRect:(NSRect)preeditRect containingRect:(NSRect)containingRect extraExpansion:(CGFloat)extraExpansion {
+- (CGPathRef)drawHighlightedWith:(SquirrelTheme *)theme highlightedRange:(NSRange)highlightedRange backgroundRect:(NSRect)backgroundRect preeditRect:(NSRect)preeditRect containingRect:(NSRect)containingRect extraExpansion:(CGFloat)extraExpansion {
   NSRect currentContainingRect = containingRect;
   currentContainingRect.size.width += extraExpansion * 2;
   currentContainingRect.size.height += extraExpansion * 2;
@@ -652,13 +677,14 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
   }
   innerBox.size.height -= halfLinespace;
   NSRect outerBox = backgroundRect;
-  outerBox.size.height -= theme.hilitedCornerRadius + preeditRect.size.height + theme.borderWidth - 2 * extraExpansion;
-  outerBox.size.width -= theme.hilitedCornerRadius + theme.borderWidth  - 2 * extraExpansion;
-  outerBox.origin.x += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2 - extraExpansion;
-  outerBox.origin.y += theme.hilitedCornerRadius / 2 + preeditRect.size.height + theme.borderWidth / 2 - extraExpansion;
+  outerBox.size.height -= preeditRect.size.height + MAX(0, theme.hilitedCornerRadius + theme.borderWidth) - 2 * extraExpansion;
+  outerBox.size.width -= MAX(0, theme.hilitedCornerRadius + theme.borderWidth) - 2 * extraExpansion;
+  outerBox.origin.x += MAX(0, theme.hilitedCornerRadius + theme.borderWidth) / 2 - extraExpansion;
+  outerBox.origin.y += preeditRect.size.height + MAX(0, theme.hilitedCornerRadius + theme.borderWidth) / 2 - extraExpansion;
   
   double effectiveRadius = MAX(0, theme.hilitedCornerRadius + 2 * extraExpansion / theme.hilitedCornerRadius * MAX(0, theme.cornerRadius - theme.hilitedCornerRadius));
-
+  CGMutablePathRef path = CGPathCreateMutable();
+  
   if (theme.linear){
     NSRect leadingRect;
     NSRect bodyRect;
@@ -682,13 +708,13 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     expand(highlightedPoints, innerBox, outerBox);
     removeCorner(highlightedPoints, rightCorners, currentContainingRect);
 
-    *path = drawSmoothLines(highlightedPoints, rightCorners, 0.3*effectiveRadius, 1.4*effectiveRadius);
+    path = drawSmoothLines(highlightedPoints, rightCorners, 0.3*effectiveRadius, 1.4*effectiveRadius);
     if (highlightedPoints2.count > 0) {
       enlarge(highlightedPoints2, extraExpansion);
       expand(highlightedPoints2, innerBox, outerBox);
       removeCorner(highlightedPoints2, rightCorners2, currentContainingRect);
-      NSBezierPath *path2 = drawSmoothLines(highlightedPoints2, rightCorners2, 0.3*effectiveRadius, 1.4*effectiveRadius);
-      [*path appendBezierPath:path2];
+      CGPathRef path2 = drawSmoothLines(highlightedPoints2, rightCorners2, 0.3*effectiveRadius, 1.4*effectiveRadius);
+      CGPathAddPath(path, NULL, path2);
     }
   } else {
     NSRect highlightedRect = [self contentRectForRange:highlightedRange];
@@ -710,18 +736,18 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     NSMutableArray<NSValue *> *highlightedPoints = [rectVertex(highlightedRect) mutableCopy];
     enlarge(highlightedPoints, extraExpansion);
     expand(highlightedPoints, innerBox, outerBox);
-    *path = drawSmoothLines(highlightedPoints, nil, 0.3*effectiveRadius, 1.4*effectiveRadius);
+    path = drawSmoothLines(highlightedPoints, nil, 0.3*effectiveRadius, 1.4*effectiveRadius);
   }
+  return path;
 }
 
 // All draws happen here
 - (void)drawRect:(NSRect)dirtyRect {
-  NSBezierPath *backgroundPath;
-  NSBezierPath *borderPath;
-  NSBezierPath *highlightedPath;
-  NSBezierPath *candidatePaths;
-  NSBezierPath *highlightedPreeditPath;
-  NSBezierPath *preeditPath;
+  CGPathRef backgroundPath = CGPathCreateMutable();
+  CGPathRef highlightedPath = CGPathCreateMutable();
+  CGMutablePathRef candidatePaths = CGPathCreateMutable();
+  CGMutablePathRef highlightedPreeditPath = CGPathCreateMutable();
+  CGPathRef preeditPath = CGPathCreateMutable();
   SquirrelTheme * theme = self.currentTheme;
 
   NSPoint textFieldOrigin = dirtyRect.origin;
@@ -731,10 +757,10 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
   // Draw preedit Rect
   NSRect backgroundRect = dirtyRect;
   NSRect containingRect = dirtyRect;
-  containingRect.size.height -= theme.hilitedCornerRadius + theme.borderWidth;
-  containingRect.size.width -= theme.hilitedCornerRadius + theme.borderWidth;
-  containingRect.origin.x += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
-  containingRect.origin.y += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
+  containingRect.size.height -= (theme.hilitedCornerRadius + theme.borderWidth) * 2;
+  containingRect.size.width -= (theme.hilitedCornerRadius + theme.borderWidth) * 2;
+  containingRect.origin.x += theme.hilitedCornerRadius + theme.borderWidth;
+  containingRect.origin.y += theme.hilitedCornerRadius + theme.borderWidth;
 
   // Draw preedit Rect
   NSRect preeditRect = NSZeroRect;
@@ -757,17 +783,13 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     if (i == _hilightedIndex) {
       // Draw highlighted Rect
       if (candidateRange.length > 0 && theme.highlightedBackColor != nil) {
-        [self drawHighlighted:&highlightedPath theme:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect containingRect:containingRect extraExpansion:0];
+        highlightedPath = [self drawHighlightedWith:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect containingRect:containingRect extraExpansion:0];
       }
     } else {
       // Draw other highlighted Rect
       if (candidateRange.length > 0 && theme.candidateBackColor != nil) {
-        NSBezierPath *candidatePath;
-        [self drawHighlighted:&candidatePath theme:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect containingRect:containingRect extraExpansion:theme.surroundingExtraExpansion];
-        if (!candidatePaths) {
-          candidatePaths = [NSBezierPath bezierPath];
-        }
-        [candidatePaths appendBezierPath:candidatePath];
+        CGPathRef candidatePath = [self drawHighlightedWith:theme highlightedRange:candidateRange backgroundRect:backgroundRect preeditRect:preeditRect containingRect:containingRect extraExpansion:theme.surroundingExtraExpansion];
+        CGPathAddPath(candidatePaths, NULL, candidatePath);
       }
     }
   }
@@ -784,10 +806,10 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
       innerBox.size.height -= theme.edgeInset.height + theme.preeditLinespace / 2 + theme.hilitedCornerRadius / 2 + 2;
     }
     NSRect outerBox = preeditRect;
-    outerBox.size.height -= theme.hilitedCornerRadius + theme.borderWidth;
-    outerBox.size.width -= theme.hilitedCornerRadius + theme.borderWidth;
-    outerBox.origin.x += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
-    outerBox.origin.y += theme.hilitedCornerRadius / 2 + theme.borderWidth / 2;
+    outerBox.size.height -= MAX(0, theme.hilitedCornerRadius + theme.borderWidth);
+    outerBox.size.width -= MAX(0, theme.hilitedCornerRadius + theme.borderWidth);
+    outerBox.origin.x += MAX(0, theme.hilitedCornerRadius + theme.borderWidth) / 2;
+    outerBox.origin.y += MAX(0, theme.hilitedCornerRadius + theme.borderWidth) / 2;
     
     NSRect leadingRect;
     NSRect bodyRect;
@@ -806,70 +828,76 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     if (highlightedPreeditPoints2.count > 0) {
       expand(highlightedPreeditPoints2, innerBox, outerBox);
       removeCorner(highlightedPreeditPoints2, rightCorners2, containingRect);
-      NSBezierPath *highlightedPreeditPath2 = drawSmoothLines(highlightedPreeditPoints2, rightCorners2, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
-      [highlightedPreeditPath appendBezierPath:highlightedPreeditPath2];
+      CGPathRef highlightedPreeditPath2 = drawSmoothLines(highlightedPreeditPoints2, rightCorners2, 0.3*theme.hilitedCornerRadius, 1.4*theme.hilitedCornerRadius);
+      CGPathAddPath(highlightedPreeditPath, NULL, highlightedPreeditPath2);
     }
   }
 
   [NSBezierPath setDefaultLineWidth:0];
   backgroundPath = drawSmoothLines(rectVertex(backgroundRect), nil, theme.cornerRadius*0.3, theme.cornerRadius*1.4);
-  _shape.path = backgroundPath.quartzPath;
-  // Nothing should extend beyond backgroundPath
-  borderPath = [backgroundPath copy];
-  [borderPath addClip];
-  borderPath.lineWidth = theme.borderWidth;
+  _shape.path = CGPathCreateMutableCopy(backgroundPath);
 
-// This block of code enables independent transparencies in highlighted colour and background colour.
-// Disabled because of the flaw: edges or rounded corners of the heighlighted area are rendered with undesirable shadows.
-#if 0
-  // Calculate intersections.
-  if (![highlightedPath isEmpty]) {
-    [backgroundPath appendBezierPath:[highlightedPath copy]];
+  [self.layer setSublayers: NULL];
+  CGMutablePathRef backPath = CGPathCreateMutableCopy(backgroundPath);
+  if (!CGPathIsEmpty(preeditPath)) {
+    CGPathAddPath(backPath, NULL, preeditPath);
   }
-  if (![candidatePaths isEmpty]) {
-    [backgroundPath appendBezierPath:[candidatePaths copy]];
-  }
-
-  if (![preeditPath isEmpty]) {
-    [backgroundPath appendBezierPath:[preeditPath copy]];
-  }
-
-  if (![highlightedPreeditPath isEmpty]) {
-    if (preeditPath != nil) {
-      [preeditPath appendBezierPath:[highlightedPreeditPath copy]];
-    } else {
-      [backgroundPath appendBezierPath:[highlightedPreeditPath copy]];
+  if (theme.mutualExclusive) {
+    if (!CGPathIsEmpty(highlightedPath)) {
+      CGPathAddPath(backPath, NULL, highlightedPath);
+    }
+    if (!CGPathIsEmpty(candidatePaths)) {
+      CGPathAddPath(backPath, NULL, candidatePaths);
     }
   }
-  [backgroundPath setWindingRule:NSEvenOddWindingRule];
-  [preeditPath setWindingRule:NSEvenOddWindingRule];
-#endif
+  CAShapeLayer *panelLayer = shapeFromPath(backPath);
+  panelLayer.fillColor = theme.backgroundColor.CGColor;
+  panelLayer.lineWidth = theme.borderWidth;
+  panelLayer.strokeColor = theme.borderColor.CGColor;
+  CAShapeLayer *panelLayerMask = shapeFromPath(backgroundPath);
+  panelLayer.mask = panelLayerMask;
+  [self.layer addSublayer: panelLayer];
 
-  [theme.backgroundColor setFill];
-  [backgroundPath fill];
-  if (theme.preeditBackgroundColor && ![preeditPath isEmpty]) {
-    [theme.preeditBackgroundColor setFill];
-    [preeditPath fill];
+  if (theme.preeditBackgroundColor && !CGPathIsEmpty(preeditPath)) {
+    CAShapeLayer *layer = shapeFromPath(preeditPath);
+    layer.fillColor = theme.preeditBackgroundColor.CGColor;
+    CGMutablePathRef maskPath = CGPathCreateMutableCopy(backgroundPath);
+    if (theme.mutualExclusive && !CGPathIsEmpty(highlightedPreeditPath)) {
+      CGPathAddPath(maskPath, NULL, highlightedPreeditPath);
+    }
+    CAShapeLayer *mask = shapeFromPath(maskPath);
+    layer.mask = mask;
+    [panelLayer addSublayer: layer];
   }
-  if (theme.candidateBackColor && ![candidatePaths isEmpty]) {
-    [theme.candidateBackColor setFill];
-    [candidatePaths fill];
+  if (theme.highlightedPreeditColor && !CGPathIsEmpty(highlightedPreeditPath)) {
+    CAShapeLayer *layer = shapeFromPath(highlightedPreeditPath);
+    layer.fillColor = theme.highlightedPreeditColor.CGColor;
+    [panelLayer addSublayer: layer];
   }
-  if (theme.highlightedBackColor && ![highlightedPath isEmpty]) {
-    [theme.highlightedBackColor setFill];
-    [highlightedPath fill];
+  if (theme.candidateBackColor && !CGPathIsEmpty(candidatePaths)) {
+    CAShapeLayer *layer = shapeFromPath(candidatePaths);
+    layer.fillColor = theme.candidateBackColor.CGColor;
+    [panelLayer addSublayer: layer];
   }
-  if (theme.highlightedPreeditColor && ![highlightedPreeditPath isEmpty]) {
-    [theme.highlightedPreeditColor setFill];
-    [highlightedPreeditPath fill];
+  if (theme.highlightedBackColor && !CGPathIsEmpty(highlightedPath)) {
+    CAShapeLayer *layer = shapeFromPath(highlightedPath);
+    layer.fillColor = theme.highlightedBackColor.CGColor;
+    if (theme.shadowSize > 0) {
+      CAShapeLayer *shadowLayer = [CAShapeLayer layer];
+      shadowLayer.shadowColor = NSColor.blackColor.CGColor;
+      shadowLayer.shadowOffset = NSMakeSize(theme.shadowSize/2, (theme.vertical ? -1 : 1) * theme.shadowSize/2);
+      shadowLayer.shadowPath = highlightedPath;
+      shadowLayer.shadowRadius = theme.shadowSize;
+      shadowLayer.shadowOpacity = 0.2;
+      CGMutablePathRef maskPath = CGPathCreateMutableCopy(backgroundPath);
+      CGPathAddPath(maskPath, NULL, highlightedPath);
+      CAShapeLayer *shadowLayerMask = shapeFromPath(maskPath);
+      shadowLayer.mask = shadowLayerMask;
+      [layer addSublayer: shadowLayer];
+    }
+    [panelLayer addSublayer: layer];
   }
-
-  if (theme.borderColor && (theme.borderWidth > 0)) {
-    [theme.borderColor setStroke];
-    [borderPath stroke];
-  }
-  NSRange glyphRange = [_text.layoutManagers[0] glyphRangeForTextContainer:_text.layoutManagers[0].textContainers[0]];
-  [_text.layoutManagers[0] drawGlyphsForGlyphRange:glyphRange atPoint:textFieldOrigin];
+  [_textView drawText:_text at:textFieldOrigin];
 }
 
 @end
@@ -903,8 +931,9 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
 }
 
 CGFloat minimumHeight(NSDictionary *attribute) {
-  const NSAttributedString *spaceChar = [[NSAttributedString alloc] initWithString:@" " attributes:attribute];
-  const CGFloat minimumHeight = [spaceChar boundingRectWithSize:NSZeroSize options:0].size.height;
+  NSMutableAttributedString *defaultChar = [[NSMutableAttributedString alloc] initWithString:@"字 " attributes:attribute];
+  convertToVerticalGlyph(defaultChar, NSMakeRange(0, defaultChar.length));
+  const CGFloat minimumHeight = [defaultChar boundingRectWithSize:NSZeroSize options:0].size.height;
   return minimumHeight;
 }
 
@@ -930,7 +959,7 @@ void convertToVerticalGlyph(NSMutableAttributedString *originalText, NSRange str
       [originalText addAttribute:NSVerticalGlyphFormAttributeName value:@(1) range:range];
       NSRect uprightCharRect = [[originalText attributedSubstringFromRange:range] boundingRectWithSize:NSZeroSize options:0];
       CGFloat widthDiff = charRect.size.width-cjkChar.size.width;
-      CGFloat offset = (cjkRect.size.height - uprightCharRect.size.height)/2 + (cjkRect.origin.y-uprightCharRect.origin.y) - (widthDiff>0 ? widthDiff/3 : widthDiff/2) +baseOffset;
+      CGFloat offset = (cjkRect.size.height - uprightCharRect.size.height)/2 + (cjkRect.origin.y-uprightCharRect.origin.y) - widthDiff/2 +baseOffset;
       [originalText addAttribute:NSBaselineOffsetAttributeName value:@(offset) range:range];
     } else {
       [originalText addAttribute:NSBaselineOffsetAttributeName value:@(baseOffset) range:range];
@@ -1047,6 +1076,7 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
       [contentView addSubview:_back];
     }
     [contentView addSubview:_view];
+    [contentView addSubview:_view.textView];
     
     self.contentView = contentView;
     [self initializeUIStyleForDarkMode:NO];
@@ -1167,6 +1197,7 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
   }
   BOOL translucency = theme.translucency;
   [_view setFrame:self.contentView.bounds];
+  [_view.textView setFrame:self.contentView.bounds];
   if (@available(macOS 10.14, *)) {
     if (translucency) {
       [_back setFrame:self.contentView.bounds];
@@ -1543,6 +1574,7 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
   BOOL inlinePreedit = [config getBool:@"style/inline_preedit"];
   BOOL inlineCandidate = [config getBool:@"style/inline_candidate"];
   BOOL translucency = [config getBool:@"style/translucency"];
+  BOOL mutualExclusive = [config getBool:@"style/mutual_exclusive"];
   NSNumber *memorizeSizeConfig = [config getOptionalBool:@"style/memorize_size"];
   if (memorizeSizeConfig) {
     theme.memorizeSize = memorizeSizeConfig.boolValue;
@@ -1565,6 +1597,7 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
   CGFloat lineSpacing = [config getDouble:@"style/line_spacing"];
   CGFloat spacing = [config getDouble:@"style/spacing"];
   CGFloat baseOffset = [config getDouble:@"style/base_offset"];
+  CGFloat shadowSize = fmax(0,[config getDouble:@"style/shadow_size"]);
 
   NSColor *backgroundColor;
   NSColor *borderColor;
@@ -1660,6 +1693,11 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
     if (translucencyOverridden) {
       translucency = translucencyOverridden.boolValue;
     }
+    NSNumber *mutualExclusiveOverridden =
+        [config getOptionalBool:[prefix stringByAppendingString:@"/mutual_exclusive"]];
+    if (mutualExclusiveOverridden) {
+      mutualExclusive = mutualExclusiveOverridden.boolValue;
+    }
     NSString *candidateFormatOverridden =
         [config getString:[prefix stringByAppendingString:@"/candidate_format"]];
     if (candidateFormatOverridden) {
@@ -1740,6 +1778,11 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
         [config getOptionalDouble:[prefix stringByAppendingString:@"/base_offset"]];
     if (baseOffsetOverridden) {
       baseOffset = baseOffsetOverridden.doubleValue;
+    }
+    NSNumber *shadowSizeOverridden =
+        [config getOptionalDouble:[prefix stringByAppendingString:@"/shadow_size"]];
+    if (shadowSizeOverridden) {
+      shadowSize = shadowSizeOverridden.doubleValue;
     }
   }
 
@@ -1889,12 +1932,14 @@ static void updateTextOrientation(BOOL *isVerticalText, SquirrelConfig *config, 
   [theme setCornerRadius:cornerRadius
      hilitedCornerRadius:hilitedCornerRadius
        srdExtraExpansion:surroundingExtraExpansion
+         shadowSize:shadowSize
                edgeInset:edgeInset
              borderWidth:MIN(borderHeight, borderWidth)
                linespace:lineSpacing
         preeditLinespace:spacing
                    alpha:alpha
             translucency:translucency
+         mutualExclusive:mutualExclusive
                   linear:linear
                 vertical:vertical
            inlinePreedit:inlinePreedit
