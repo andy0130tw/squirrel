@@ -315,10 +315,8 @@ SquirrelTheme *_darkTheme;
     NSAttributedString *str = [self.text attributedSubstringFromRange:range];
     NSRange nonWhiteRange = [str.string rangeOfCharacterFromSet:NSCharacterSet.whitespaceCharacterSet.invertedSet options:NSBackwardsSearch];
     if (nonWhiteRange.location != NSNotFound) {
-      NSRange newRange = NSMakeRange(range.location, nonWhiteRange.location+1);
-      NSRange actualRange = NSMakeRange(NSNotFound, 0);
-      [self.text.layoutManagers[0] glyphRangeForCharacterRange:newRange actualCharacterRange:&actualRange];
-      CGFloat width = [self.text attributedSubstringFromRange:actualRange].size.width;
+      NSRange newRange = NSMakeRange(range.location, NSMaxRange(nonWhiteRange));
+      CGFloat width = [self.text attributedSubstringFromRange:newRange].size.width;
       if (width > actualWidth) {
         actualWidth = width;
       }
