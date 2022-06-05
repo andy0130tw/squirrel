@@ -850,8 +850,6 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
   }
   CAShapeLayer *panelLayer = shapeFromPath(backPath);
   panelLayer.fillColor = theme.backgroundColor.CGColor;
-  panelLayer.lineWidth = theme.borderWidth;
-  panelLayer.strokeColor = theme.borderColor.CGColor;
   CAShapeLayer *panelLayerMask = shapeFromPath(backgroundPath);
   panelLayer.mask = panelLayerMask;
   [self.layer addSublayer: panelLayer];
@@ -866,6 +864,13 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     CAShapeLayer *mask = shapeFromPath(maskPath);
     layer.mask = mask;
     [panelLayer addSublayer: layer];
+  }
+  if (theme.borderWidth > 0 && theme.borderColor) {
+    CAShapeLayer *borderLayer = shapeFromPath(backgroundPath);
+    borderLayer.lineWidth = theme.borderWidth * 2;
+    borderLayer.strokeColor = theme.borderColor.CGColor;
+    borderLayer.fillColor = NULL;
+    [panelLayer addSublayer: borderLayer];
   }
   if (theme.highlightedPreeditColor && !CGPathIsEmpty(highlightedPreeditPath)) {
     CAShapeLayer *layer = shapeFromPath(highlightedPreeditPath);
