@@ -189,54 +189,9 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 
 @end
 
-@interface SquirrelTextView : NSView
-
-@property(nonatomic, readonly) NSTextStorage *text;
-@property(nonatomic, readonly) NSPoint origin;
-- (void)drawText:(NSTextStorage *)text
-              at:(NSPoint)origin;
-
-@end
-
-@implementation SquirrelTextView
-
-// Need flipped coordinate system, as required by textStorage
-- (BOOL)isFlipped {
-  return YES;
-}
-
-- (instancetype)initWithFrame:(NSRect)frameRect {
-  self = [super initWithFrame:frameRect];
-  // Use textStorage to store text and manage all text layout and draws
-  NSTextContainer *textContainer = [[NSTextContainer alloc] initWithSize:NSZeroSize];
-  textContainer.lineFragmentPadding = 0.0;
-  NSLayoutManager *layoutManager = [[NSLayoutManager alloc] init];
-  [layoutManager addTextContainer:textContainer];
-  _text = [[NSTextStorage alloc] init];
-  [_text addLayoutManager:layoutManager];
-  layoutManager.backgroundLayoutEnabled = YES;
-  return self;
-}
-
-- (void)drawText:(NSTextStorage *)text
-              at:(NSPoint)origin {
-  [_text setAttributedString:text];
-  _text.layoutManagers[0].textContainers[0].containerSize = text.layoutManagers[0].textContainers[0].containerSize;
-  _origin = origin;
-  self.needsDisplay = YES;
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-  NSRange glyphRange = [_text.layoutManagers[0] glyphRangeForTextContainer:_text.layoutManagers[0].textContainers[0]];
-  [_text.layoutManagers[0] drawGlyphsForGlyphRange:glyphRange atPoint:_origin];
-}
-
-@end
-
 @interface SquirrelView : NSView
 
-@property(nonatomic, readonly) NSTextStorage *text;
-@property(nonatomic, readonly) SquirrelTextView *textView;
+@property(nonatomic, readonly) NSTextView *textView;
 @property(nonatomic, readonly) NSArray<NSValue *> *candidateRanges;
 @property(nonatomic, readonly) NSInteger hilightedIndex;
 @property(nonatomic, readonly) NSRange preeditRange;
@@ -247,7 +202,6 @@ static NSString *const kDefaultCandidateFormat = @"%c.\u00A0%@";
 @property(nonatomic, assign) CGFloat seperatorWidth;
 @property(nonatomic, readonly) CAShapeLayer *shape;
 
-- (void)setText:(NSAttributedString *)text;
 - (void)         drawViewWith:(NSArray<NSValue *> *)candidateRanges
                hilightedIndex:(NSInteger)hilightedIndex
                  preeditRange:(NSRange)preeditRange
@@ -288,15 +242,14 @@ SquirrelTheme *_darkTheme;
     self.wantsLayer = YES;
     self.layer.masksToBounds = YES;
   }
-  // Use textStorage to store text and manage all text layout and draws
+  _textView = [[NSTextView alloc] initWithFrame:frameRect];
   NSTextContainer *textContainer = [[NSTextContainer alloc] initWithSize:NSZeroSize];
   textContainer.lineFragmentPadding = 0.0;
-  NSLayoutManager *layoutManager = [[NSLayoutManager alloc] init];
-  [layoutManager addTextContainer:textContainer];
-  _text = [[NSTextStorage alloc] init];
-  [_text addLayoutManager:layoutManager];
-  layoutManager.backgroundLayoutEnabled = YES;
-  _textView = [[SquirrelTextView alloc] initWithFrame:frameRect];
+  _textView.drawsBackground = NO;
+  _textView.editable = NO;
+  _textView.selectable = NO;
+  [_textView replaceTextContainer:textContainer];
+  _textView.layoutManager.backgroundLayoutEnabled = YES;
   _defaultTheme = [[SquirrelTheme alloc] init];
   if (@available(macOS 10.14, *)) {
     _darkTheme = [[SquirrelTheme alloc] init];
@@ -307,16 +260,16 @@ SquirrelTheme *_darkTheme;
 
 // Get the rectangle containing entire contents, expensive to calculate
 - (NSRect)contentRect {
-  NSRange glyphRange = [_text.layoutManagers[0] glyphRangeForTextContainer:_text.layoutManagers[0].textContainers[0]];
-  NSRect rect = [_text.layoutManagers[0] boundingRectForGlyphRange:glyphRange inTextContainer:_text.layoutManagers[0].textContainers[0]];
+  NSRange glyphRange = [_textView.layoutManager glyphRangeForTextContainer:_textView.textContainer];
+  NSRect rect = [_textView.layoutManager boundingRectForGlyphRange:glyphRange inTextContainer:_textView.textContainer];
   __block long actualWidth = 0;
-  [_text.layoutManagers[0] enumerateLineFragmentsForGlyphRange:glyphRange usingBlock:^(CGRect rect, CGRect usedRect, NSTextContainer *textContainer, NSRange glyphRange, BOOL *stop) {
-    NSRange range = [self.text.layoutManagers[0] characterRangeForGlyphRange:glyphRange actualGlyphRange:NULL];
-    NSAttributedString *str = [self.text attributedSubstringFromRange:range];
+  [_textView.layoutManager enumerateLineFragmentsForGlyphRange:glyphRange usingBlock:^(CGRect rect, CGRect usedRect, NSTextContainer *textContainer, NSRange glyphRange, BOOL *stop) {
+    NSRange range = [self.textView.layoutManager characterRangeForGlyphRange:glyphRange actualGlyphRange:NULL];
+    NSAttributedString *str = [self.textView.textStorage attributedSubstringFromRange:range];
     NSRange nonWhiteRange = [str.string rangeOfCharacterFromSet:NSCharacterSet.whitespaceCharacterSet.invertedSet options:NSBackwardsSearch];
     if (nonWhiteRange.location != NSNotFound) {
       NSRange newRange = NSMakeRange(range.location, NSMaxRange(nonWhiteRange));
-      CGFloat width = [self.text attributedSubstringFromRange:newRange].size.width;
+      CGFloat width = [self.textView.textStorage attributedSubstringFromRange:newRange].size.width;
       if (width > actualWidth) {
         actualWidth = width;
       }
@@ -330,13 +283,9 @@ SquirrelTheme *_darkTheme;
 
 // Get the rectangle containing the range of text, will first convert to glyph range, expensive to calculate
 - (NSRect)contentRectForRange:(NSRange)range {
-  NSRange glyphRange = [_text.layoutManagers[0] glyphRangeForCharacterRange:range actualCharacterRange:NULL];
-  NSRect rect = [_text.layoutManagers[0] boundingRectForGlyphRange:glyphRange inTextContainer:_text.layoutManagers[0].textContainers[0]];
+  NSRange glyphRange = [_textView.layoutManager glyphRangeForCharacterRange:range actualCharacterRange:NULL];
+  NSRect rect = [_textView.layoutManager boundingRectForGlyphRange:glyphRange inTextContainer:_textView.textContainer];
   return rect;
-}
-
-- (void)setText:(NSAttributedString *)text {
-  [_text setAttributedString:[text copy]];
 }
 
 // Will triger - (void)drawRect:(NSRect)dirtyRect
@@ -442,8 +391,8 @@ BOOL nearEmptyRect(NSRect rect) {
 // Calculate 3 boxes containing the text in range. leadingRect and trailingRect are incomplete line rectangle
 // bodyRect is complete lines in the middle
 - (void)multilineRectForRange:(NSRange)charRange leadingRect:(NSRect *)leadingRect bodyRect:(NSRect *)bodyRect trailingRect:(NSRect *)trailingRect {
-  NSLayoutManager *layoutManager = _text.layoutManagers[0];
-  NSTextContainer *textContainer = layoutManager.textContainers[0];
+  NSLayoutManager *layoutManager = _textView.layoutManager;
+  NSTextContainer *textContainer = _textView.textContainer;
   NSRange glyphRange = [layoutManager glyphRangeForCharacterRange:charRange actualCharacterRange:NULL];
   NSRect boundingRect = [layoutManager boundingRectForGlyphRange:glyphRange inTextContainer:textContainer];
   NSRange fullRangeInBoundingRect = [layoutManager glyphRangeForBoundingRect:boundingRect inTextContainer:textContainer];
@@ -601,7 +550,7 @@ void enlarge(NSMutableArray<NSValue *> *vertex, CGFloat by) {
 
 // Add gap between horizontal candidates
 - (void)addGapBetweenHorizontalCandidates:(NSRect *)rect range:(NSRange)highlightedRange {
-  if (NSMaxRange(highlightedRange) == _text.length) {
+  if (NSMaxRange(highlightedRange) == _textView.textStorage.length) {
     if (!nearEmptyRect(*rect)) {
       rect->size.width += _seperatorWidth;
       rect->origin.x -= _seperatorWidth / 2;
@@ -719,7 +668,7 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     highlightedRect.size.width = backgroundRect.size.width;
     highlightedRect.size.height += theme.linespace;
     highlightedRect.origin = NSMakePoint(backgroundRect.origin.x, highlightedRect.origin.y + theme.edgeInset.height - halfLinespace);
-    if (NSMaxRange(highlightedRange) == _text.length) {
+    if (NSMaxRange(highlightedRange) == _textView.textStorage.length) {
       highlightedRect.size.height += theme.edgeInset.height - halfLinespace;
     }
     if (highlightedRange.location - ((_preeditRange.location == NSNotFound ? 0 : _preeditRange.location)+_preeditRange.length) <= 1) {
@@ -900,7 +849,7 @@ void removeCorner(NSMutableArray<NSValue *> *highlightedPoints, NSMutableSet<NSN
     }
     [panelLayer addSublayer: layer];
   }
-  [_textView drawText:_text at:textFieldOrigin];
+  [_textView setTextContainerInset:NSMakeSize(textFieldOrigin.x, textFieldOrigin.y)];
 }
 
 @end
@@ -1128,12 +1077,13 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
   }
 
   //Break line if the text is too long, based on screen size.
-  CGFloat textWidth = _view.text.size.width;
+  CGFloat textWidth = _view.textView.textStorage.size.width;
   CGFloat maxTextWidth = [self getMaxTextWidth:theme];
+  CGFloat maxTextHeight = theme.vertical ? _screenRect.size.width - theme.edgeInset.width * 2 : _screenRect.size.height - theme.edgeInset.height * 2;
   if (textWidth > maxTextWidth) {
     textWidth = maxTextWidth;
   }
-  _view.text.layoutManagers[0].textContainers[0].containerSize = NSMakeSize(textWidth, 0);
+  _view.textView.textContainer.containerSize = NSMakeSize(textWidth, maxTextHeight);
 
   NSRect windowRect;
   // in vertical mode, the width and height are interchanged
@@ -1144,7 +1094,7 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
       _maxHeight = contentRect.size.width;
     } else {
       contentRect.size.width = _maxHeight;
-      _view.text.layoutManagers[0].textContainers[0].containerSize = NSMakeSize(_maxHeight, 0);
+      _view.textView.textContainer.containerSize = NSMakeSize(_maxHeight, maxTextHeight);
     }
   }
 
@@ -1455,7 +1405,7 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
   fixDefaultFont(text);
 
   // text done!
-  [_view setText:text];
+  [_view.textView.textStorage setAttributedString:text];
   [_view drawViewWith:candidateRanges hilightedIndex:index preeditRange:_preeditRange highlightedPreeditRange:highlightedPreeditRange];
   [self show];
 }
@@ -1476,7 +1426,7 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
                value:statusStyle
                range:NSMakeRange(0, text.length)];
   fixDefaultFont(text);
-  [_view setText:text];
+  [_view.textView.textStorage setAttributedString:text];
   NSRange emptyRange = NSMakeRange(NSNotFound, 0);
   [_view drawViewWith:[[NSArray alloc] init] hilightedIndex:0 preeditRange:emptyRange highlightedPreeditRange:emptyRange];
   [self show];
