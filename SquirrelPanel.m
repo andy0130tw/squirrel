@@ -266,10 +266,11 @@ SquirrelTheme *_darkTheme;
   [_textView.layoutManager enumerateLineFragmentsForGlyphRange:glyphRange usingBlock:^(CGRect rect, CGRect usedRect, NSTextContainer *textContainer, NSRange glyphRange, BOOL *stop) {
     NSRange range = [self.textView.layoutManager characterRangeForGlyphRange:glyphRange actualGlyphRange:NULL];
     NSAttributedString *str = [self.textView.textStorage attributedSubstringFromRange:range];
-    NSRange nonWhiteRange = [str.string rangeOfCharacterFromSet:NSCharacterSet.whitespaceCharacterSet.invertedSet options:NSBackwardsSearch];
+    NSRange nonWhiteRange = [str.string rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet.invertedSet options:NSBackwardsSearch];
     if (nonWhiteRange.location != NSNotFound) {
       NSRange newRange = NSMakeRange(range.location, NSMaxRange(nonWhiteRange));
-      CGFloat width = [self.textView.textStorage attributedSubstringFromRange:newRange].size.width;
+      NSRange newGlyphRange = [self.textView.layoutManager glyphRangeForCharacterRange:newRange actualCharacterRange:NULL];
+      CGFloat width = [self.textView.layoutManager boundingRectForGlyphRange:newGlyphRange inTextContainer:self.textView.textContainer].size.width;
       if (width > actualWidth) {
         actualWidth = width;
       }
@@ -1040,12 +1041,8 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
   }
 
   //Break line if the text is too long, based on screen size.
-  CGFloat textWidth = _view.textView.textStorage.size.width;
-  CGFloat maxTextWidth = [self getMaxTextWidth:theme];
+  CGFloat textWidth = [self getMaxTextWidth:theme];
   CGFloat maxTextHeight = theme.vertical ? _screenRect.size.width - theme.edgeInset.width * 2 : _screenRect.size.height - theme.edgeInset.height * 2;
-  if (textWidth > maxTextWidth) {
-    textWidth = maxTextWidth;
-  }
   _view.textView.textContainer.containerSize = NSMakeSize(textWidth, maxTextHeight);
 
   NSRect windowRect;
@@ -1106,12 +1103,10 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
   // rotate the view, the core in vertical mode!
   if (theme.vertical) {
     self.contentView.boundsRotation = -90;
-    _view.textView.layoutOrientation = NSTextLayoutOrientationVertical;
     _view.textView.boundsRotation = 0;
     [self.contentView setBoundsOrigin:NSMakePoint(0, windowRect.size.width)];
   } else {
     self.contentView.boundsRotation = 0;
-    _view.textView.layoutOrientation = NSTextLayoutOrientationHorizontal;
     _view.textView.boundsRotation = 0;
     [self.contentView setBoundsOrigin:NSMakePoint(0, 0)];
   }
@@ -1168,6 +1163,7 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
   }
 
   SquirrelTheme *theme = _view.currentTheme;
+  [self getCurrentScreen];
   CGFloat maxTextWidth = [self getMaxTextWidth:theme];
 
   NSMutableAttributedString *text = [[NSMutableAttributedString alloc] init];
@@ -1256,7 +1252,11 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
                         attributes:labelAttrs]];
       // get the label size for indent
       if (!theme.linear) {
-        labelWidth = [line boundingRectWithSize:NSZeroSize options:NSStringDrawingUsesLineFragmentOrigin].size.width;
+        NSMutableAttributedString *str = [line mutableCopy];
+        if (theme.vertical) {
+          [str addAttribute:NSVerticalGlyphFormAttributeName value:@(1) range:NSMakeRange(0, str.length)];
+        }
+        labelWidth = [str boundingRectWithSize:NSZeroSize options:NSStringDrawingUsesLineFragmentOrigin].size.width;
       }
     }
 
@@ -1325,7 +1325,12 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
     NSAttributedString *separator = [[NSMutableAttributedString alloc]
                                         initWithString:(theme.linear ? @"  " : @"\n")
                                             attributes:attrs];
-    _view.seperatorWidth = [separator boundingRectWithSize:NSZeroSize options:0].size.width;
+    
+    NSMutableAttributedString *str = [separator mutableCopy];
+    if (theme.vertical) {
+      [str addAttribute:NSVerticalGlyphFormAttributeName value:@(1) range:NSMakeRange(0, str.length)];
+    }
+    _view.seperatorWidth = [str boundingRectWithSize:NSZeroSize options:0].size.width;
 
     NSMutableParagraphStyle *paragraphStyleCandidate = [theme.paragraphStyle mutableCopy];
     if (i == 0) {
@@ -1351,6 +1356,11 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
 
   // text done!
   [_view.textView.textStorage setAttributedString:text];
+  if (theme.vertical) {
+    _view.textView.layoutOrientation = NSTextLayoutOrientationVertical;
+  } else {
+    _view.textView.layoutOrientation = NSTextLayoutOrientationHorizontal;
+  }
   [_view drawViewWith:candidateRanges hilightedIndex:index preeditRange:_preeditRange highlightedPreeditRange:highlightedPreeditRange];
   [self show];
 }
@@ -1367,6 +1377,11 @@ NSAttributedString *insert(NSString *separator, NSAttributedString *betweenText)
                range:NSMakeRange(0, text.length)];
   fixDefaultFont(text);
   [_view.textView.textStorage setAttributedString:text];
+  if (theme.vertical) {
+    _view.textView.layoutOrientation = NSTextLayoutOrientationVertical;
+  } else {
+    _view.textView.layoutOrientation = NSTextLayoutOrientationHorizontal;
+  }
   NSRange emptyRange = NSMakeRange(NSNotFound, 0);
   [_view drawViewWith:[[NSArray alloc] init] hilightedIndex:0 preeditRange:emptyRange highlightedPreeditRange:emptyRange];
   [self show];
